@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Sep 29 11:18:47 2022
+
+@author: saiful
+"""
+#%%
+""" Testing image classification accuracy on a  mobilenet model pretrained on "document" dataset"""
+import sys
+sys.path.insert(0, '..')  # Enable import from parent folder.
+import torchvision
+import torch
+from torchvision import datasets, models
+from torch import nn, optim
+import torch.nn.functional as F
+from torchvision import transforms
+import torch
+from torchvision import transforms
+from pathlib import Path
+from torchvision import datasets, models
+from torch import nn, optim
+import torch.nn.functional as F
+
+#%%
+def get_torch_device():
+    print("get_torch_device()")
+    return torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
+
+device = get_torch_device()
+print("device used :",device)
+#%%
+batch_size = 100
+num_train_samples= 1000  #319837
+num_val_samples= 200  #39995
+num_test_samples= 200   #39996
+
+document_transform =torchvision.transforms.Compose([
+    torchvision.transforms.Resize(256),
+    torchvision.transforms.CenterCrop(224),
+    torchvision.transforms.ToTensor(),
+    # transforms.Normalize(mean=[0.485, 0.456, 0.406],
+    #                       std=[0.229, 0.224, 0.225]),
+            # transforms.Normalize((0, 0, 0), (1, 1, 1)),
+])
+path_trainimages=r"/data/saiful/rvl-cdip/train/"
+path_testimages=r"/data/saiful/rvl-cdip/test/"
+path_validationimages=r"/data/saiful/rvl-cdip/validation"
+
+
+train_dataset_docu = torchvision.datasets.ImageFolder(root=path_trainimages,                                           
+                                                  transform=document_transform)
+
+validation_dataset_docu = torchvision.datasets.ImageFolder(root=path_validationimages,                                           
+                                                  transform=document_transform)
+test_dataset_docu = torchvision.datasets.ImageFolder(root=path_testimages,                                           
+                                                 transform=document_transform)
+
+random_sampled_train_set_docu = torch.utils.data.RandomSampler(train_dataset_docu, 
+                                                            replacement=False, 
+                                                            num_samples=num_train_samples, 
+                                                            generator=None)
+random_sampled_val_set_docu = torch.utils.data.RandomSampler(validation_dataset_docu, 
+                                                            replacement=False, 
+                                                            num_samples=num_val_samples, 
+                                                            generator=None)
+random_sampled_test_set_docu = torch.utils.data.RandomSampler(test_dataset_docu, 
+                                                            replacement=False, 
+                                                            num_samples=num_test_samples, 
+                                                            generator=None)
+
+train_loader = torch.utils.data.DataLoader(
+                                            dataset=train_dataset_docu, 
+                                            sampler=random_sampled_train_set_docu,
+                                            shuffle=False, 
+                                            batch_size=batch_size,
+                                            num_workers=0)
+
+
+val_loader = torch.utils.data.DataLoader(
+                                            validation_dataset_docu,
+                                            sampler=random_sampled_val_set_docu,
+                                            shuffle=False, 
+                                            batch_size=batch_size,
+                                            num_workers=0)
+
+test_loader = torch.utils.data.DataLoader(
+                                            test_dataset_docu, 
+                                            sampler=random_sampled_test_set_docu,
+                                            shuffle=False, 
+                                            batch_size=batch_size,
+                                            num_workers=0)
+
+
+print("\ntrain_dataset_docu length :", len(train_dataset_docu))
+print("validation_dataset_docu length:",len(validation_dataset_docu))
+print("test_dataset_docu length :", len(test_dataset_docu))
+
+
+train_features, train_labels = next(iter(train_loader))
+val_features, val_labels = next(iter(val_loader))
+test_features, test_labels = next(iter(test_loader))
+
+print(f"Feature batch shape: {train_features.size()}")
+print(f"Labels batch shape: {train_labels.size()}")
+
+#%%
+
+path= Path.cwd()
+
+state_dict = torch.load(path / "mobilenet88.pt", map_location=device)
+
+model_ft =models.mobilenet_v2(pretrained=False)
+model_ft.classifier[1] = nn.Linear(in_features=1280, out_features=16)
+model_ft =model_ft.to(device)
+model_ft.load_state_dict(state_dict, strict=False)      
+m= model_ft.to(device)
+# transform = transforms.Compose([])  # No input transform
+            # transform = transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+net=m       
+net=net.to(device)
+
+#%%
+for param in net.parameters():
+    param.requires_grad = False
+
+batch_loss = 0
+total_t=0
+correct_t=0
+val_acc = []
+with torch.no_grad():
+    net.eval()
+    print("prediction has been started")
+    for data_t, target_t in (test_loader):
+        data_t, target_t = data_t.to(device), target_t.to(device)
+        outputs_t = net(data_t)
+        _,pred_t = torch.max(outputs_t, dim=1)
+        correct_t += torch.sum(pred_t==target_t).item()
+        total_t += target_t.size(0)
+
+    print(f' test accuracy: for {num_test_samples} test image samples {(100 * correct_t/total_t):.4f}\n')
+
+net.train()
